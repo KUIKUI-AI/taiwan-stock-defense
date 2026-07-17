@@ -112,7 +112,7 @@ def main():
             translated_summary = translate_to_zh_tw(summary[:250]) if summary else "無新聞摘要。"
 
             payload = {
-                "username": "全球戰事速報 (中英雙語防禦版)",
+                "username": "全球戰事速報",
                 "embeds": [{
                     # 標題改為：【中文翻譯】(下方保留英文原標題對照)
                     "title": f"⚠️ 突發：{translated_title}",
