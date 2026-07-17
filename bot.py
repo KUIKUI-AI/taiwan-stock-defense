@@ -5,10 +5,10 @@ import requests
 import os
 import sys
 import json
+import urllib.parse
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-# 直接在程式碼內定義要監控的多個 RSS 新聞源（不需透過任何第三方平台合併）
 NEWS_FEEDS = [
     "https://search.cnbc.com/rs/search/combined/?partnerId=2&query=breaking%20news&output=rss", # CNBC Breaking
     "https://www.reutersagency.com/feed/?best-sectors=news", # Reuters World
@@ -30,6 +30,27 @@ def save_sent_links(sent_links):
     list_to_save = list(sent_links)[-100:]
     with open(CACHE_FILE, "w") as f:
         json.dump(list_to_save, f)
+
+def translate_to_zh_tw(text):
+    """
+    使用免費免 API Key 的 Google 翻譯接口，將英文翻譯為繁體中文。
+    """
+    if not text:
+        return ""
+    try:
+        # 進行網址編碼以防特殊字元出錯
+        encoded_text = urllib.parse.quote(text)
+        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t&q={encoded_text}"
+        
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            result = response.json()
+            # 解析 Google 翻譯返回的嵌套 List
+            translated_sentences = [sentence[0] for sentence in result[0] if sentence[0]]
+            return "".join(translated_sentences)
+    except Exception as e:
+        print(f"⚠️ 翻譯失敗: {e}")
+    return "[翻譯失敗]"
 
 def main():
     if not DISCORD_WEBHOOK_URL:
@@ -73,7 +94,7 @@ def main():
     CRITICAL_KEYWORDS = ["breaking", "war", "attack", "missile", "iran", "military", "explosion", "crisis", "strike"]
     new_alerts_sent = False
 
-    # 5. 執行掃描與過濾
+    # 5. 執行掃描、過濾與翻譯
     for entry in all_entries:
         title = entry.get("title", "")
         link = entry.get("link", "")
@@ -85,12 +106,19 @@ def main():
         content_to_check = f"{title} {summary}".lower()
         
         if any(kw in content_to_check for kw in CRITICAL_KEYWORDS):
+            # 觸發黑天鵝，進行即時翻譯！
+            print(f"🚨 偵測到重大新聞，正在翻譯中...")
+            translated_title = translate_to_zh_tw(title)
+            translated_summary = translate_to_zh_tw(summary[:250]) if summary else "無新聞摘要。"
+
             payload = {
-                "username": "全球戰事速報 (防禦特化版)",
+                "username": "全球戰事速報 (中英雙語防禦版)",
                 "embeds": [{
-                    "title": f"⚠️ 突發要聞：{title}",
+                    # 標題改為：【中文翻譯】(下方保留英文原標題對照)
+                    "title": f"⚠️ 突發：{translated_title}",
                     "url": link,
-                    "description": summary[:200] if summary else "無新聞摘要。",
+                    "description": f"**💡 中文摘要：**\n{translated_summary}\n\n"
+                                   f"**🌐 英文原文 (Original):**\n*{title}*\n{summary[:150]}...",
                     "color": 16711680,
                     "footer": {
                         "text": f"偵測時間 (Taipei): {now_tw.strftime('%Y-%m-%d %H:%M:%S')}"
@@ -101,7 +129,7 @@ def main():
             try:
                 res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
                 if res.status_code in [200, 204]:
-                    print(f"✅ 已成功推播: {title}")
+                    print(f"✅ 已成功推播雙語新聞: {title}")
                     sent_links.add(link)
                     new_alerts_sent = True
                 else:
