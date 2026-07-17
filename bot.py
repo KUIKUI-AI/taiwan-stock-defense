@@ -6,10 +6,15 @@ import os
 import sys
 import json
 
-CHIMPFEEDR_URL = os.environ.get("CHIMPFEEDR_URL")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-# 定義快取檔案名稱（用於防重複推播）
+# 直接在程式碼內定義要監控的多個 RSS 新聞源（不需透過任何第三方平台合併）
+NEWS_FEEDS = [
+    "https://search.cnbc.com/rs/search/combined/?partnerId=2&query=breaking%20news&output=rss", # CNBC Breaking
+    "https://www.reutersagency.com/feed/?best-sectors=news", # Reuters World
+    "http://feeds.bbci.co.uk/news/world/rss.xml" # BBC World
+]
+
 CACHE_FILE = "sent_links_cache.json"
 
 def load_sent_links():
@@ -22,14 +27,13 @@ def load_sent_links():
     return set()
 
 def save_sent_links(sent_links):
-    # 只保留最近 100 筆，避免快取檔案無限膨脹
     list_to_save = list(sent_links)[-100:]
     with open(CACHE_FILE, "w") as f:
         json.dump(list_to_save, f)
 
 def main():
-    if not CHIMPFEEDR_URL or not DISCORD_WEBHOOK_URL:
-        print("【配置錯誤】未設定環境變數 CHIMPFEEDR_URL 或 DISCORD_WEBHOOK_URL")
+    if not DISCORD_WEBHOOK_URL:
+        print("【配置錯誤】未設定環境變數 DISCORD_WEBHOOK_URL")
         sys.exit(1)
 
     tw_tz = pytz.timezone('Asia/Taipei')
@@ -42,7 +46,7 @@ def main():
     # 1. 判斷台股開盤期間 (週一至週五 08:45 - 13:45)
     is_market_open = (0 <= weekday <= 4) and (845 <= current_time_val <= 1345)
 
-    # 2. 變速邏輯攔截（加入 10 分鐘的容差區間，防 GitHub Actions 延遲啟動）
+    # 2. 變速邏輯攔截
     if not is_market_open:
         is_sentinel_window = (0 <= minute <= 9) or (30 <= minute <= 39)
         if not is_sentinel_window:
@@ -56,27 +60,30 @@ def main():
     # 3. 載入歷史推播紀錄
     sent_links = load_sent_links()
 
-    # 4. 執行掃描
-    feed = feedparser.parse(CHIMPFEEDR_URL)
-    
+    # 4. 收集所有來源的新聞
+    all_entries = []
+    for url in NEWS_FEEDS:
+        try:
+            feed = feedparser.parse(url)
+            if hasattr(feed, 'entries'):
+                all_entries.extend(feed.entries)
+        except Exception as e:
+            print(f"⚠️ 抓取 RSS 來源失敗 ({url}): {e}")
+
     CRITICAL_KEYWORDS = ["breaking", "war", "attack", "missile", "iran", "military", "explosion", "crisis", "strike"]
     new_alerts_sent = False
 
-    # 依時間由舊到新排序（有些 RSS 預設最新在最上面，反向處理可以讓最新消息最後被推播）
-    entries = reversed(feed.entries) if hasattr(feed, 'entries') else []
-
-    for entry in entries:
+    # 5. 執行掃描與過濾
+    for entry in all_entries:
         title = entry.get("title", "")
         link = entry.get("link", "")
         summary = entry.get("summary", "") or entry.get("description", "")
         
-        # 檢查是否已推播過
         if link in sent_links:
             continue
 
         content_to_check = f"{title} {summary}".lower()
         
-        # 關鍵字過濾
         if any(kw in content_to_check for kw in CRITICAL_KEYWORDS):
             payload = {
                 "username": "全球戰事速報 (防禦特化版)",
@@ -102,7 +109,7 @@ def main():
             except Exception as e:
                 print(f"❌ 發送請求至 Discord 時發生異常: {e}")
 
-    # 5. 如果有新推播，更新快取檔案
+    # 6. 如果有新推播，更新快取檔案
     if new_alerts_sent:
         save_sent_links(sent_links)
     else:
