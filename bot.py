@@ -107,18 +107,17 @@ def main():
         
         if any(kw in content_to_check for kw in CRITICAL_KEYWORDS):
             # 觸發黑天鵝，進行即時翻譯！
-            print(f"🚨 偵測到重大新聞，正在翻譯中...")
+            print(f"🚨 偵測到重大新聞，正在翻譯標題...")
             translated_title = translate_to_zh_tw(title)
-            translated_summary = translate_to_zh_tw(summary[:250]) if summary else "無新聞摘要。"
 
             payload = {
                 "username": "全球戰事速報",
                 "embeds": [{
-                    # 標題改為：【中文翻譯】(下方保留英文原標題對照)
+                    # 標題：顯示流暢的繁體中文
                     "title": f"⚠️ 突發：{translated_title}",
                     "url": link,
-                    "description": f"**💡 中文摘要：**\n{translated_summary}\n\n"
-                                   f"**🌐 英文原文 (Original):**\n*{title}*\n{summary[:150]}...",
+                    # 描述：僅保留乾淨的中英對照，移除容易夾帶網頁廣告/推薦影片雜訊的 summary
+                    "description": f"**🌐 英文原標題 (Original):**\n*{title}*",
                     "color": 16711680,
                     "footer": {
                         "text": f"偵測時間 (Taipei): {now_tw.strftime('%Y-%m-%d %H:%M:%S')}"
