@@ -1,0 +1,48 @@
+name: Black Swan Radar
+
+on:
+  schedule:
+    # 台灣時間 08:00 - 14:00 (UTC 00:00 - 06:00)，每 10 分鐘跑一次（台股與前後緩衝時間）
+    # 其餘時間每 10 分鐘也會喚醒，但會被 Python 內的「哨兵模式」自動過濾
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # 保留手動觸發按鈕，方便測試
+
+jobs:
+  run-radar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-cache-dependency-path: "" # 停用預設依賴快取避免干擾
+
+      - name: Install Dependencies
+        run: |
+          pip install feedparser requests pytz
+
+      # 讀取上一次執行成功的快取
+      - name: Restore Sent Links Cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: sent_links_cache.json
+          key: sent-links-${{ github.run_id }} # 每次用新 key
+          restore-keys: |
+            sent-links-
+
+      - name: Run Radar Script
+        env:
+          CHIMPFEEDR_URL: ${{ secrets.CHIMPFEEDR_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python bot.py
+
+      # 儲存最新的已推播連結到快取
+      - name: Save Sent Links Cache
+        if: always() # 確保即使腳本中間出錯，有成功推播的部分依然能存入快取，防止洗版
+        uses: actions/cache/save@v4
+        with:
+          path: sent_links_cache.json
+          key: sent-links-${{ github.run_id }}-${{ github.run_attempt }}
